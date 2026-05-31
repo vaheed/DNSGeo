@@ -1,0 +1,13 @@
+# Optional production HTTPS overlay for Poweradmin.
+# Requirements:
+#   1. POWERADMIN_FQDN in .env is a real public DNS name pointing to this server.
+#   2. Ports 80/tcp and 443/tcp are reachable from the public internet.
+#   3. ACME_EMAIL in .env is set to a monitored email address.
+# Start with:
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+
+services:
+  poweradmin:
+    ports:
+      - "80:80"
+      - "443:443"

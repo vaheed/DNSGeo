@@ -1,0 +1,119 @@
+version: "2.4"
+
+services:
+  postgres-replica:
+    build:
+      context: ../docker/postgres-replica
+    image: virak/pdns-postgres-replica:local
+    container_name: pdns-postgres-replica
+    restart: unless-stopped
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      PRIMARY_HOST: ${PRIMARY_HOST}
+      PRIMARY_PORT: ${PRIMARY_PORT}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      REPLICATION_USER: ${REPLICATION_USER}
+      REPLICATION_SLOT_NAME: ${REPLICATION_SLOT_NAME}
+      REPLICA_CREATE_SLOT: ${REPLICA_CREATE_SLOT}
+      REPLICATION_SSLMODE: ${REPLICATION_SSLMODE}
+    ports:
+      - "${POSTGRES_REPLICA_PORT}:5432"
+    volumes:
+      - postgres-replica-data:/var/lib/postgresql/data
+      - ./tls:/tls:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    networks:
+      - pdns-replica-net
+
+  mmdb-updater:
+    build:
+      context: ../docker/mmdb-updater
+    image: virak/mmdb-updater:local
+    container_name: pdns-mmdb-updater
+    restart: unless-stopped
+    environment:
+      MMDB_PROVIDER: ${MMDB_PROVIDER}
+      IP2LOCATION_DOWNLOAD_TOKEN: ${IP2LOCATION_DOWNLOAD_TOKEN}
+      IP2LOCATION_DATABASE_CODE: ${IP2LOCATION_DATABASE_CODE}
+      MMDB_DOWNLOAD_URL: ${MMDB_DOWNLOAD_URL}
+      MMDB_DOWNLOAD_HEADER: ${MMDB_DOWNLOAD_HEADER}
+      MMDB_DOWNLOAD_INTERVAL_SECONDS: ${MMDB_DOWNLOAD_INTERVAL_SECONDS}
+      MMDB_DOWNLOAD_RETRIES: ${MMDB_DOWNLOAD_RETRIES}
+      MMDB_EXPECTED_SHA256: ${MMDB_EXPECTED_SHA256}
+      MMDB_TARGET_FILE: ${MMDB_TARGET_FILE}
+    volumes:
+      - ./runtime/mmdb:/mmdb
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/mmdb-healthcheck.sh"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 600s
+    networks:
+      - pdns-replica-net
+
+  pdns-auth:
+    build:
+      context: ../docker/pdns-auth
+    image: virak/pdns-auth-50-lua-pgsql:local
+    container_name: pdns-auth
+    restart: unless-stopped
+    depends_on:
+      postgres-replica:
+        condition: service_healthy
+      mmdb-updater:
+        condition: service_healthy
+    environment:
+      PDNS_LOCAL_ADDRESS: "0.0.0.0,::"
+      PDNS_LOCAL_PORT: 53
+      PDNS_DB_HOST: postgres-replica
+      PDNS_DB_PORT: 5432
+      PDNS_DB_NAME: pdns
+      PDNS_DB_USER: pdns
+      PDNS_DB_PASSWORD: ${PDNS_DB_PASSWORD}
+      PDNS_GPGSQL_EXTRA_CONNECTION_PARAMETERS: sslmode=disable
+      PDNS_PRIMARY: "no"
+      PDNS_SECONDARY: "no"
+      PDNS_API_KEY: ${PDNS_API_KEY}
+      PDNS_WEBSERVER_PASSWORD: ${PDNS_WEBSERVER_PASSWORD}
+      PDNS_WEBSERVER_ALLOW_FROM: ${PDNS_WEBSERVER_ALLOW_FROM}
+      PDNS_GEO_BOOTSTRAP_ZONE_FILE: /etc/powerdns/geo/lua-bootstrap.yml
+      PDNS_GEO_MMDB_FILE: /var/lib/powerdns/mmdb/GeoLite2-City.mmdb
+      PDNS_EDNS_SUBNET_PROCESSING: ${PDNS_EDNS_SUBNET_PROCESSING}
+      PDNS_ENABLE_LUA_RECORDS: ${PDNS_ENABLE_LUA_RECORDS}
+      PDNS_LUA_RECORDS_EXEC_LIMIT: ${PDNS_LUA_RECORDS_EXEC_LIMIT}
+      PDNS_LUA_HEALTH_CHECKS_INTERVAL: ${PDNS_LUA_HEALTH_CHECKS_INTERVAL}
+      PDNS_LUA_HEALTH_CHECKS_EXPIRE_DELAY: ${PDNS_LUA_HEALTH_CHECKS_EXPIRE_DELAY}
+      PDNS_CACHE_TTL: ${PDNS_CACHE_TTL}
+      PDNS_QUERY_CACHE_TTL: ${PDNS_QUERY_CACHE_TTL}
+      PDNS_LOGLEVEL: ${PDNS_LOGLEVEL}
+      PDNS_RESTART_ON_MMDB_CHANGE: ${PDNS_RESTART_ON_MMDB_CHANGE}
+      PDNS_MMDB_WATCH_INTERVAL_SECONDS: ${PDNS_MMDB_WATCH_INTERVAL_SECONDS}
+      PDNS_DB_WAIT_TIMEOUT_SECONDS: ${PDNS_DB_WAIT_TIMEOUT_SECONDS}
+    ports:
+      - "${DNS_PORT}:53/udp"
+      - "${DNS_PORT}:53/tcp"
+      - "${PDNS_API_PORT}:8081"
+    volumes:
+      - ../geo:/etc/powerdns/geo:ro
+      - ./runtime/mmdb:/var/lib/powerdns/mmdb:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/pdns-healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 120s
+    networks:
+      - pdns-replica-net
+
+networks:
+  pdns-replica-net:
+    driver: bridge
+
+volumes:
+  postgres-replica-data:

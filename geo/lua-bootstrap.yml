@@ -1,0 +1,11 @@
+# Empty GeoIP backend zone file.
+#
+# GeoDNS records in this repository are NOT defined here.
+# PowerDNS still loads the geoip backend so Lua functions such as
+# continent(), country(), countryCode(), continentCode(), and pickclosest()
+# can use the MMDB geolocation database.
+#
+# Keep this file valid YAML. Real zones and LUA records live in PostgreSQL
+# and are managed with Poweradmin or the PowerDNS HTTP API.
+
+domains: []

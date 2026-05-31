@@ -1,0 +1,17 @@
+letsencrypt/*
+proxy_data/*
+.env
+runtime/postgres-data/
+runtime/postgres-tls/*
+!runtime/postgres-tls/.gitkeep
+runtime/mmdb/*
+!runtime/mmdb/.gitkeep
+*.log
+.DS_Store
+
+examples/api/00-env.sh
+replica/.env
+replica/tls/*
+!replica/tls/.gitkeep
+replica/runtime/mmdb/*
+!replica/runtime/mmdb/.gitkeep

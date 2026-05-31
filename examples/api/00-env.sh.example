@@ -1,0 +1,16 @@
+# Copy to 00-env.sh and edit.
+# Run from this examples/api directory.
+
+export PDNS_API_BASE="http://127.0.0.1:8081/api/v1/servers/localhost"
+export PDNS_API_KEY="change-me-long-random-api-key"
+
+# Use trailing dots for PowerDNS API names.
+export ZONE="example.com."
+export NS1="ns1.example.com."
+export NS2="ns2.example.com."
+export HOSTMASTER="hostmaster.example.com."
+
+export ORIGIN_IPV4="203.0.113.10"
+export EU_IPV4="203.0.113.40"
+export NA_IPV4="203.0.113.50"
+export AS_IPV4="203.0.113.30"

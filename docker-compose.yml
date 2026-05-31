@@ -1,0 +1,255 @@
+services:
+  postgres:
+    build:
+      context: ./docker/postgres-primary
+    image: virak/pdns-postgres-primary:local
+    container_name: pdns-postgres-primary
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      POSTGRES_DB: postgres
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+      PGDATA: /var/lib/postgresql/data
+      PDNS_DB_PASSWORD: ${PDNS_DB_PASSWORD}
+      POWERADMIN_DB_PASSWORD: ${POWERADMIN_DB_PASSWORD}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      DNS_BASE_DOMAIN: ${DNS_BASE_DOMAIN}
+      DNS_NS1: ${DNS_NS1}
+      DNS_NS2: ${DNS_NS2}
+      DNS_NS3: ${DNS_NS3}
+      DNS_HOSTMASTER: ${DNS_HOSTMASTER}
+      DNS_DEFAULT_SERIAL: ${DNS_DEFAULT_SERIAL}
+      SEED_BASE_ZONE: ${SEED_BASE_ZONE}
+      NS1_IPV4: ${NS1_IPV4}
+      NS2_IPV4: ${NS2_IPV4}
+      NS3_IPV4: ${NS3_IPV4}
+      NS1_IPV6: ${NS1_IPV6:-}
+      NS2_IPV6: ${NS2_IPV6:-}
+      NS3_IPV6: ${NS3_IPV6:-}
+      PG_MAX_WAL_SENDERS: ${PG_MAX_WAL_SENDERS}
+      PG_MAX_REPLICATION_SLOTS: ${PG_MAX_REPLICATION_SLOTS}
+      PG_WAL_KEEP_SIZE: ${PG_WAL_KEEP_SIZE}
+      PG_TLS_DAYS: ${PG_TLS_DAYS}
+      PG_TLS_CA_CN: ${PG_TLS_CA_CN}
+      PG_TLS_SERVER_CN: ${PG_TLS_SERVER_CN}
+      PG_TLS_SAN: ${PG_TLS_SAN}
+      PG_REPLICATION_CLIENT_CERT_AUTH: ${PG_REPLICATION_CLIENT_CERT_AUTH}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./runtime/postgres-tls:/var/lib/postgresql/tls
+    healthcheck:
+      test: ["CMD-SHELL", 'test -s /var/lib/postgresql/tls/ca.crt && PGPASSWORD="$${POSTGRES_PASSWORD}" psql "host=localhost port=5432 dbname=postgres user=postgres sslmode=verify-ca sslrootcert=/var/lib/postgresql/tls/ca.crt" -qAt -c "SELECT 1" >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - pdns-net
+
+  db-init:
+    build:
+      context: ./docker/postgres-init
+    image: virak/pdns-postgres-init:local
+    container_name: pdns-db-init
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_SUPERUSER_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      PG_TLS_CA_FILE: /certs/postgres/ca.crt
+      PG_SSLMODE: verify-ca
+      DB_INIT_TIMEOUT_SECONDS: ${DB_INIT_TIMEOUT_SECONDS}
+      PDNS_DB_PASSWORD: ${PDNS_DB_PASSWORD}
+      POWERADMIN_DB_PASSWORD: ${POWERADMIN_DB_PASSWORD}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      DNS_BASE_DOMAIN: ${DNS_BASE_DOMAIN}
+      DNS_NS1: ${DNS_NS1}
+      DNS_NS2: ${DNS_NS2}
+      DNS_NS3: ${DNS_NS3}
+      DNS_HOSTMASTER: ${DNS_HOSTMASTER}
+      DNS_DEFAULT_SERIAL: ${DNS_DEFAULT_SERIAL}
+      SEED_BASE_ZONE: ${SEED_BASE_ZONE}
+      NS1_IPV4: ${NS1_IPV4}
+      NS2_IPV4: ${NS2_IPV4}
+      NS3_IPV4: ${NS3_IPV4}
+      NS1_IPV6: ${NS1_IPV6:-}
+      NS2_IPV6: ${NS2_IPV6:-}
+      NS3_IPV6: ${NS3_IPV6:-}
+      SEED_LUA_EXAMPLES: ${SEED_LUA_EXAMPLES}
+      LUA_GEO_DEFAULT_IPV4: ${LUA_GEO_DEFAULT_IPV4}
+      LUA_GEO_EU_IPV4: ${LUA_GEO_EU_IPV4}
+      LUA_GEO_NA_IPV4: ${LUA_GEO_NA_IPV4}
+      LUA_GEO_AS_IPV4: ${LUA_GEO_AS_IPV4}
+      LUA_GEO_HEALTH_PORT: ${LUA_GEO_HEALTH_PORT}
+    volumes:
+      - ./runtime/postgres-tls:/certs/postgres:ro
+    networks:
+      - pdns-net
+
+  mmdb-updater:
+    build:
+      context: ./docker/mmdb-updater
+    image: virak/mmdb-updater:local
+    container_name: pdns-mmdb-updater
+    restart: unless-stopped
+    environment:
+      MMDB_PROVIDER: ${MMDB_PROVIDER}
+      IP2LOCATION_DOWNLOAD_TOKEN: ${IP2LOCATION_DOWNLOAD_TOKEN}
+      IP2LOCATION_DATABASE_CODE: ${IP2LOCATION_DATABASE_CODE}
+      MMDB_DOWNLOAD_URL: ${MMDB_DOWNLOAD_URL}
+      MMDB_DOWNLOAD_HEADER: ${MMDB_DOWNLOAD_HEADER}
+      MMDB_DOWNLOAD_INTERVAL_SECONDS: ${MMDB_DOWNLOAD_INTERVAL_SECONDS}
+      MMDB_DOWNLOAD_RETRIES: ${MMDB_DOWNLOAD_RETRIES}
+      MMDB_EXPECTED_SHA256: ${MMDB_EXPECTED_SHA256}
+      MMDB_TARGET_FILE: ${MMDB_TARGET_FILE}
+    volumes:
+      - ./runtime/mmdb:/mmdb
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/mmdb-healthcheck.sh"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 600s
+    networks:
+      - pdns-net
+
+  pdns-auth:
+    build:
+      context: ./docker/pdns-auth
+    image: virak/pdns-auth-50-lua-pgsql:local
+    container_name: pdns-auth
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_started
+      mmdb-updater:
+        condition: service_healthy
+    environment:
+      PDNS_LOCAL_ADDRESS: "0.0.0.0,::"
+      PDNS_LOCAL_PORT: 53
+      PDNS_DB_HOST: postgres
+      PDNS_DB_PORT: 5432
+      PDNS_DB_NAME: pdns
+      PDNS_DB_USER: pdns
+      PDNS_DB_PASSWORD: ${PDNS_DB_PASSWORD}
+      PDNS_GPGSQL_EXTRA_CONNECTION_PARAMETERS: ${PDNS_GPGSQL_EXTRA_CONNECTION_PARAMETERS}
+      PDNS_API_KEY: ${PDNS_API_KEY}
+      PDNS_WEBSERVER_PASSWORD: ${PDNS_WEBSERVER_PASSWORD}
+      PDNS_WEBSERVER_ALLOW_FROM: ${PDNS_WEBSERVER_ALLOW_FROM}
+      PDNS_GEO_BOOTSTRAP_ZONE_FILE: ${PDNS_GEO_BOOTSTRAP_ZONE_FILE}
+      PDNS_GEO_MMDB_FILE: ${PDNS_GEO_MMDB_FILE}
+      PDNS_EDNS_SUBNET_PROCESSING: ${PDNS_EDNS_SUBNET_PROCESSING}
+      PDNS_ENABLE_LUA_RECORDS: ${PDNS_ENABLE_LUA_RECORDS}
+      PDNS_LUA_RECORDS_EXEC_LIMIT: ${PDNS_LUA_RECORDS_EXEC_LIMIT}
+      PDNS_LUA_HEALTH_CHECKS_INTERVAL: ${PDNS_LUA_HEALTH_CHECKS_INTERVAL}
+      PDNS_LUA_HEALTH_CHECKS_EXPIRE_DELAY: ${PDNS_LUA_HEALTH_CHECKS_EXPIRE_DELAY}
+      PDNS_CACHE_TTL: ${PDNS_CACHE_TTL}
+      PDNS_QUERY_CACHE_TTL: ${PDNS_QUERY_CACHE_TTL}
+      PDNS_LOGLEVEL: ${PDNS_LOGLEVEL}
+      PDNS_RESTART_ON_MMDB_CHANGE: ${PDNS_RESTART_ON_MMDB_CHANGE}
+      PDNS_MMDB_WATCH_INTERVAL_SECONDS: ${PDNS_MMDB_WATCH_INTERVAL_SECONDS}
+      PDNS_DB_WAIT_TIMEOUT_SECONDS: ${PDNS_DB_WAIT_TIMEOUT_SECONDS}
+    ports:
+      - "${DNS_PORT}:53/udp"
+      - "${DNS_PORT}:53/tcp"
+    volumes:
+      - ./geo:/etc/powerdns/geo:ro
+      - ./runtime/mmdb:/var/lib/powerdns/mmdb:ro
+      - ./runtime/postgres-tls:/var/lib/postgresql/tls:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/pdns-healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 120s
+    networks:
+      - pdns-net
+
+  poweradmin:
+    build:
+      context: ./docker/poweradmin
+      args:
+        POWERADMIN_TAG: ${POWERADMIN_TAG:-stable}
+    image: virak/poweradmin:${POWERADMIN_TAG:-stable}-pdns
+    container_name: poweradmin
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_started
+      pdns-auth:
+        condition: service_healthy
+    environment:
+      PA_CREATE_ADMIN: "true"
+      PA_ADMIN_USERNAME: ${PA_ADMIN_USERNAME}
+      PA_ADMIN_PASSWORD: ${PA_ADMIN_PASSWORD}
+      PA_ADMIN_EMAIL: ${PA_ADMIN_EMAIL}
+      PA_ADMIN_FULLNAME: ${PA_ADMIN_FULLNAME}
+      PA_SESSION_KEY: ${PA_SESSION_KEY}
+      PA_STYLE: ${PA_STYLE}
+      PA_TIMEZONE: ${PA_TIMEZONE}
+      PA_PDNS_API_URL: http://pdns-auth:8081
+      PA_PDNS_API_KEY: ${PDNS_API_KEY}
+      PA_PDNS_SERVER_NAME: localhost
+      PA_DNSSEC_ENABLED: "true"
+      DB_TYPE: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: poweradmin
+      DB_PASS: ${POWERADMIN_DB_PASSWORD}
+      DB_NAME: pdns
+      DB_SSL: "true"
+      DB_SSL_VERIFY: "true"
+      DB_SSL_CA: /certs/postgres/ca.crt
+      DNS_NS1: ${DNS_NS1}
+      DNS_NS2: ${DNS_NS2}
+      DNS_HOSTMASTER: ${DNS_HOSTMASTER}
+      POWERADMIN_DB_WAIT_TIMEOUT_SECONDS: ${POWERADMIN_DB_WAIT_TIMEOUT_SECONDS}
+      POWERADMIN_FQDN: ${POWERADMIN_FQDN}
+      ACME_EMAIL: ${ACME_EMAIL}
+      PA_BASE_URL: "https://pdns-adm.nsg.vaheed.net:4433"
+    volumes:
+      - ./runtime/postgres-tls:/certs/postgres:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/poweradmin-healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 300s
+    networks:
+      - pdns-net
+
+  proxy:
+    image: 'jc21/nginx-proxy-manager:latest'
+    restart: unless-stopped
+
+    ports:
+      - '80:80'
+      - '4433:443'
+      - '8181:81'
+      - '5432:5432'
+    environment:
+      TZ: "Asia/Tehran"
+      DISABLE_IPV6: 'true'
+
+    volumes:
+      - ./proxy_data:/data
+      - ./letsencrypt:/etc/letsencrypt
+    networks:
+      - pdns-net
+
+networks:
+  pdns-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
